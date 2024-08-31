@@ -1,8 +1,8 @@
-#include "./utils/vector.h"
-#include "./utils/randomNumberGenerator.h"
+#include "../utils/vector.h"
+#include "../utils/randomNumberGenerator.h"
 #include <functional>
 #include <stdexcept>
-enum ActivationFunctions {unipolarBinary,bipolarBinary,unipolarSigmoidal,bipolarSigmoidal,relu,parametricLeakyRelu,exponential,swish};
+enum ActivationTypes {unipolarBinary,bipolarBinary,unipolarSigmoidal,bipolarSigmoidal,relu,parametricLeakyRelu,exponential,swish,nothing};
 struct ActivationParameters {
   float unipolarBinaryThreshold=0.0;
   float bipolarBinaryThreshold=0.0;
@@ -15,83 +15,126 @@ struct ActivationParameters {
   float exponentialThreshold=0.0;
 };
 class Neuron{
-  private:
-  Vector weight;
+  public:
+  
   float output;
   float bias;
   float neti;
-  ActivationFunctions activationFunction;
   ActivationParameters activationParameters;
-  std::function<float()>activationFunc;
-  public:
-  Neuron(ActivationFunctions activationFunction,Vector weight,float bias=0,ActivationParameters parameters=ActivationParameters());
-  Neuron(ActivationFunctions activationFunction,int weightVectorSize,ActivationParameters parameters=ActivationParameters());
+  std::function<float(float,ActivationParameters)>activationFunc;
+  Vector weight;
+  float fNeti;
+  float delE;
+  float delB;
+  Vector delW;
+  int weightDimension;
+  Neuron(ActivationTypes activationType,Vector weight,float bias=0,ActivationParameters parameters=ActivationParameters());
+  ActivationTypes activationType;
+  Neuron(ActivationTypes activationType,int weightVectorSize,float bias=0, ActivationParameters parameters=ActivationParameters());
+  Neuron(){}
   void setActivationFunction();
   float calcNeti(Vector input);
   float calcFNeti();
+  float calcFDashNeti();
+  void update();
+  void print();
 };
-Neuron::Neuron(ActivationFunctions activationFunction, Vector weight, float bias, ActivationParameters parameters)
-    : activationFunction(activationFunction), weight(weight), bias(bias), activationParameters(parameters) {
+Neuron::Neuron(ActivationTypes activationType, Vector weight, float bias, ActivationParameters parameters)
+    : activationType(activationType), weight(weight), bias(bias), activationParameters(parameters) {
+      // cout<<activationType<<endl;
+      weightDimension=weight.size;
     setActivationFunction();
     }
-Neuron::Neuron(ActivationFunctions activationFunction,int weightVectorSize,ActivationParameters parameters=ActivationParameters()):activationFunction(activationFunction),activationParameters(parameters){
+Neuron::Neuron(ActivationTypes activationType,int weightVectorSize,float bias,ActivationParameters parameters):activationType(activationType),activationParameters(parameters),bias(bias){
+      // cout<<activationType<<endl;
+      weightDimension=weightVectorSize;
+      
     this->weight=Vector(weightVectorSize);
     for(int i=0;i<weight.size;i++){
-      weight[i]=generateRandomFloat(0.0,0.25);
+      weight[i]=generateRandomFloat(-0.25,0.25);
     }
     setActivationFunction();
 };
 void Neuron::setActivationFunction(){
-  switch (activationFunction)
+  switch (activationType)
   {
   case unipolarBinary:
-    activationFunc=[this](){
+    activationFunc= [this](float neti,ActivationParameters activationParameters ){
       return (neti>=activationParameters.unipolarBinaryThreshold)?1.0:0.0;};
       break;
   case bipolarBinary:
-    activationFunc=[this](){
+    activationFunc=[this](float neti,ActivationParameters activationParameters){
       return (neti>=activationParameters.bipolarBinaryThreshold)?1.0:-1.0;
     };
     break;
   case unipolarSigmoidal:
-    activationFunc=[this](){
+    activationFunc=[this](float neti,ActivationParameters activationParameters){
       return 1/(1+exp(-activationParameters.unipolarSigmoidalLambda*neti));
     };
     break;
   case bipolarSigmoidal:
-    activationFunc=[this](){
+    activationFunc=[this](float neti,ActivationParameters activationParameters){
       return 2/(1+exp(-activationParameters.bipolarSigmoidalLambda*neti))-1.0;
     };
     break;
       case relu:
-    activationFunc=[this](){
+    activationFunc=[this](float neti,ActivationParameters activationParameters){
       return max(activationParameters.reluThreshold,neti);
     };
     break;
       case parametricLeakyRelu:
-    activationFunc=[this](){
+    activationFunc=[this](float neti,ActivationParameters activationParameters){
       return neti>=activationParameters.parametricLeakyReluThreshold?neti:activationParameters.parametricLeakyReluParameter*neti;
     };
     break;
       case exponential:
-    activationFunc=[this](){
+    activationFunc=[this](float neti,ActivationParameters activationParameters){
       return neti>=activationParameters.exponentialThreshold?neti:activationParameters.exponentialParameter*(exp(neti)-1);
     };
     break;
       case swish:
-    activationFunc=[this](){
+    activationFunc=[this](float neti,ActivationParameters activationParameters){
       return neti/(1+exp(-neti));
     };
     break;
      default:
-            throw std::invalid_argument("Unsupported activation function");
+     activationFunc=[this](float neti,ActivationParameters activationParameters){
+      // cout<<"Nothinf"<<neti<<endl;
+      return neti;
+     };
     break;
   }
 }
+void Neuron::print(){
+  cout<<"Weight ";
+  for(int i=0;i<weight.size;i++){
+    cout<<weight[i]<<" ";
+  }
+  cout<<"Neti="<<neti<<" FnetI="<<fNeti<<" fDash="<<calcFDashNeti()<<" dele=" <<delE<<" bias= "<<bias<<" delB="<<delB<<" weights=";
+  for(int i=0;i<delW.size;i++){
+   cout<<delW[i]<<" ";
+  }
+  cout<<endl<<endl;
+}
 float Neuron:: calcNeti(Vector input){
-  neti=(weight*input);
-  return neti;
+  return neti=weight*input+bias;
 }
 float Neuron::calcFNeti(){
-  return activationFunc();
+   if (!activationFunc) {
+      throw std::runtime_error("Activation function not set!");
+   }
+  //  if(activationType==nothing)
+  //  cout<<"calculating the "<<neti<<endl;
+  return fNeti= activationFunc(neti,activationParameters);
+}
+float Neuron::calcFDashNeti(){
+  if(activationType==unipolarSigmoidal)
+  return activationParameters.unipolarSigmoidalLambda*fNeti*(1-fNeti);
+  else if(activationType==bipolarSigmoidal)
+  return activationParameters.bipolarSigmoidalLambda*(1-fNeti*fNeti);
+else return neti;
+}
+void Neuron::update(){
+  weight=weight+delW;
+  bias=bias+delB;
 }

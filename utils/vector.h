@@ -1,6 +1,7 @@
 #include<vector>
 #include<iostream>
 #include<numeric>
+#include <initializer_list>
 using namespace std;
 class Vector{
   private:

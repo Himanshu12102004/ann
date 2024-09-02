@@ -2,9 +2,11 @@
 #define layerImported
 #include "./layer.cpp"
 #endif
+#include "../utils/json.hpp"
+using json = nlohmann::json;
 class HiddenLayer:public Layer{
   public:
-   HiddenLayer(int neuronCount,int layerNumber):Layer(neuronCount,layerNumber){}
+  HiddenLayer(int neuronCount,int layerNumber):Layer(neuronCount,layerNumber){}
   void buildLayer(int lastNeuronCount,ActivationTypes activationType=unipolarSigmoidal);
 };
 void HiddenLayer:: buildLayer(int lastNeuronCount,ActivationTypes activationType){

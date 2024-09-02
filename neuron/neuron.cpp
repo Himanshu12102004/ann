@@ -2,6 +2,8 @@
 #include "../utils/randomNumberGenerator.h"
 #include <functional>
 #include <stdexcept>
+#include "../utils/json.hpp"
+using json = nlohmann::json;
 enum ActivationTypes {unipolarBinary,bipolarBinary,unipolarSigmoidal,bipolarSigmoidal,relu,parametricLeakyRelu,exponential,swish,nothing};
 struct ActivationParameters {
   float unipolarBinaryThreshold=0.0;
@@ -38,6 +40,7 @@ class Neuron{
   float calcFDashNeti();
   void update();
   void print();
+  json parseNeuron();
 };
 Neuron::Neuron(ActivationTypes activationType, Vector weight, float bias, ActivationParameters parameters)
     : activationType(activationType), weight(weight), bias(bias), activationParameters(parameters) {
@@ -106,14 +109,16 @@ void Neuron::setActivationFunction(){
   }
 }
 void Neuron::print(){
-  cout<<"Weight ";
-  for(int i=0;i<weight.size;i++){
-    cout<<weight[i]<<" ";
-  }
-  cout<<"Neti="<<neti<<" FnetI="<<fNeti<<" fDash="<<calcFDashNeti()<<" dele=" <<delE<<" bias= "<<bias<<" delB="<<delB<<" weights=";
-  for(int i=0;i<delW.size;i++){
-   cout<<delW[i]<<" ";
-  }
+  // cout<<"Weight ";
+  // for(int i=0;i<weight.size;i++){
+  //   cout<<weight[i]<<" ";
+  // }
+  // cout<<bias;
+  cout<<"Neti="<<neti<<" FnetI="<<fNeti<<"Activation Type="<<activationType;
+  // <<" fDash="<<calcFDashNeti()<<" dele=" <<delE<<" bias= "<<bias<<" delB="<<delB<<" weights=";
+  // for(int i=0;i<delW.size;i++){
+  //  cout<<delW[i]<<" ";
+  // }
   cout<<endl<<endl;
 }
 float Neuron:: calcNeti(Vector input){
@@ -137,4 +142,12 @@ else return neti;
 void Neuron::update(){
   weight=weight+delW;
   bias=bias+delB;
+}
+json Neuron::parseNeuron(){
+  json neuronJson;
+    for(int l=0;l<weight.size;l++){
+              neuronJson["weight"].push_back(weight[l]);
+            }
+            neuronJson["bias"] = bias;
+  return neuronJson;  
 }

@@ -2,6 +2,8 @@
 #define layerImported
 #include "./layer.cpp"
 #endif
+#include "../utils/json.hpp"
+using json = nlohmann::json;
 class OutputLayer:public Layer{
   public:
    OutputLayer(int neuronCount,int layerNumber):Layer(neuronCount,layerNumber){}

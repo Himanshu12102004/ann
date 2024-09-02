@@ -1,19 +1,20 @@
 #include "../layer/inputLayer.cpp"
 #include "../layer/hiddenLayer.cpp"
 #include "../layer/outputLayer.cpp"
-#include "json.hpp"
+#include "../utils/json.hpp"
 #include <fstream>
 #include <vector>
 #include <string>
 #include <fstream>
 using json = nlohmann::json;
 using namespace std;
+enum AnnMode{training,testing,production};
 struct LayerInfo{
   int neuronCount=1;
   ActivationTypes activationType=unipolarSigmoidal;
 };
 class Ann {
-private:
+public:
     string inputFile;
     string outputFile;
     int inputVectorDimension;
@@ -26,13 +27,17 @@ private:
     vector<Layer*>layers;
     vector<vector<float> > inputs;
     vector<vector<float> > outputs;
+    vector<pair<float,float> > inputMaximaMinima;
+    vector<pair<float,float> >outputMaximaMinima;
     float thisIterationError;
+    AnnMode mode;
+    json trainedWeightsAndBias;
+    
 public:
     string err;
-    Ann(string inputFile, string outputFile, int inputVectorDimension, int outputVectorDimension, int numberOfPresentations,vector<LayerInfo> layerInfo);
+    Ann(string inputFile, int inputVectorDimension, int outputVectorDimension, int numberOfPresentations,AnnMode mode,vector<LayerInfo> layerInfo={}, string outputFile="ann.json");
     Ann(){};
     void buildAnn();
-    void readFile();
     void calcOutput();
     void printVectors();
     void computeErrors();
@@ -43,26 +48,49 @@ public:
     void train();
     void writeErrorsInFile();
     void saveAnn();
+    void readInputFile();
     void readAnn();
-    void parseAnn();
+    void normalizeData();
+    void normalizeOutput();
+    void normalizeInputs();
+    void normalizeSingleInput(vector<float> singleInput);
+    void printOutput();
+    vector<float> unNormalizedOutput(vector<float> normalizedOutputs);
 };
-Ann::Ann(string inputFile, string outputFile, int inputVectorDimension, int outputVectorDimension, int numberOfPresentations,vector<LayerInfo> layerInfo)
-    : inputFile(inputFile), outputFile(outputFile), inputVectorDimension(inputVectorDimension), outputVectorDimension(outputVectorDimension), numberOfPresentations(numberOfPresentations),layerInfo(layerInfo){
+Ann::Ann(string inputFile,  int inputVectorDimension, int outputVectorDimension, int numberOfPresentations,AnnMode mode,vector<LayerInfo> layerInfo,string outputFile)
+    : inputFile(inputFile),mode(mode), outputFile(outputFile), inputVectorDimension(inputVectorDimension), outputVectorDimension(outputVectorDimension), numberOfPresentations(numberOfPresentations),layerInfo(layerInfo){
 
     if (inputVectorDimension <= 0 || outputVectorDimension <= 0 || numberOfPresentations <= 0) {
         throw invalid_argument("Dimensions and number of presentations must be positive integers.");
     }
     inputs.resize(numberOfPresentations, vector<float>(inputVectorDimension, 0.0f));
     outputs.resize(numberOfPresentations, vector<float>(outputVectorDimension, 0.0f));
-    hiddenLayerCount=layerInfo.size();
     presentationNo=0;
     thisIterationError=1e20;
-
+    if(mode==training){
+      readInputFile();
+    }
+    else if(mode==testing){
+      layerInfo={};
+      readInputFile();
+      readAnn();
+      json layerInfoJson=trainedWeightsAndBias["layerInfo"];
+      for(size_t i=0;i<layerInfoJson.size();i++){
+        LayerInfo lyr;
+        lyr.activationType=layerInfoJson[i]["activationType"];
+        lyr.neuronCount=layerInfoJson[i]["neuronCount"];
+        layerInfo.push_back(lyr);
+      }
+    }
+    hiddenLayerCount=layerInfo.size();
+    buildAnn();
+    // cout<<hiddenLayerCount;
 }
 void Ann::computeErrors(){
    
 }
 void Ann::buildAnn(){
+  if(mode==training){
   layers.push_back(new InputLayer(inputVectorDimension,0));
   layers[0]->buildLayer(1,nothing);
   for(int i=1;i<=hiddenLayerCount;i++){
@@ -71,71 +99,54 @@ void Ann::buildAnn(){
   }
   layers.push_back(new OutputLayer(outputVectorDimension,hiddenLayerCount+1));
   layers[hiddenLayerCount+1]->buildLayer(layers[hiddenLayerCount]->neuronCount);
-};
-void Ann::saveAnn() {
-    std::ofstream outFile("ann.dat", std::ios::binary);
-    if (!outFile) {
-        std::cerr << "Error opening file for writing!" << std::endl;
-        return;
-    }
-    outFile.write(reinterpret_cast<const char*>(&inputVectorDimension), sizeof(inputVectorDimension));
-    outFile.write(reinterpret_cast<const char*>(&outputVectorDimension), sizeof(outputVectorDimension));
-    outFile.write(reinterpret_cast<const char*>(&numberOfPresentations), sizeof(numberOfPresentations));
-    outFile.write(reinterpret_cast<const char*>(&hiddenLayerCount), sizeof(hiddenLayerCount));
-    outFile.write(reinterpret_cast<const char*>(&presentationNo), sizeof(presentationNo));
-    outFile.write(reinterpret_cast<const char*>(&currentIteration), sizeof(currentIteration));
-    outFile.write(reinterpret_cast<const char*>(&thisIterationError), sizeof(thisIterationError));
-    outFile.write(reinterpret_cast<const char*>(layerInfo.data()), sizeof(LayerInfo) * layerInfo.size());
+  }
+  else if(mode==testing){
+    layers.push_back(new InputLayer(inputVectorDimension,0));
+    layers[0]->buildLayer(trainedWeightsAndBias["layers"][0],nothing);
+     for(size_t i=1;i<=hiddenLayerCount;i++){
+    layers.push_back(new HiddenLayer(layerInfo[i-1].neuronCount,i));
+    layers[i]->buildLayer(trainedWeightsAndBias["layers"][i],layerInfo[i-1].activationType);
+     }
+  layers.push_back(new OutputLayer(layerInfo[hiddenLayerCount-1].neuronCount,hiddenLayerCount+1));
+  layers[hiddenLayerCount+1]->buildLayer(trainedWeightsAndBias["layers"][hiddenLayerCount+1]);
+   inputMaximaMinima.resize(inputVectorDimension);
+        outputMaximaMinima.resize(outputVectorDimension);
 
-    for (const auto& inputVector : inputs) {
-        outFile.write(reinterpret_cast<const char*>(inputVector.data()), sizeof(float) * inputVector.size());
-    }
-
-    for (const auto& outputVector : outputs) {
-        outFile.write(reinterpret_cast<const char*>(outputVector.data()), sizeof(float) * outputVector.size());
-    }
-
-    for (int i = 0; i < layers.size(); ++i) {
-        for (int j = 0; j < layers[i]->neuronCount; ++j) {
-            outFile.write(reinterpret_cast<const char*>(&layers[i]->layerNeurons[j]), sizeof(Neuron));
+        for (size_t i = 0; i < inputVectorDimension; ++i) {
+            inputMaximaMinima[i].first = trainedWeightsAndBias["inputMaximaMinima"][i]["first"];
+            inputMaximaMinima[i].second = trainedWeightsAndBias["inputMaximaMinima"][i]["second"];
         }
-    }
 
-    outFile.close();
-}
+        for (size_t i = 0; i < outputVectorDimension; ++i) {
+            outputMaximaMinima[i].first = trainedWeightsAndBias["outputMaximaMinima"][i]["first"];
+            outputMaximaMinima[i].second = trainedWeightsAndBias["outputMaximaMinima"][i]["second"];
+        }
+  }
+};
 
 void Ann::readAnn() {
-    std::ifstream inFile("ann.dat", std::ios::binary);
-    if (!inFile) {
-        std::cerr << "Error opening file for reading!" << std::endl;
-        return;
+      std::ifstream inFile("ann.json");
+    if (!inFile.is_open()) {
+        throw std::runtime_error("Unable to open file ann.json");
     }
-    
-    inFile.read(reinterpret_cast<char*>(this), sizeof(*this));
-
-    if (!inFile) {
-        std::cerr << "Error reading file or file is corrupted!" << std::endl;
-        return;
-    }
-
+    inFile >> trainedWeightsAndBias;
     inFile.close();
 }
 
 void Ann::printLayers(){
-  // for(int i=0;i<hiddenLayerCount+2;i++){
-  //   for(int j=0;j<layers[i]->neuronCount;j++){
-  //     layers[i]->layerNeurons[j].print();
-  //   }
-  // }
-  float outp=layers[hiddenLayerCount+1]->layerNeurons[0].fNeti;
-  cout<<outp<<" ";
+  for(int i=0;i<hiddenLayerCount+2;i++){
+  cout<<"=================================================================================="<<endl;;
+    for(int j=0;j<layers[i]->neuronCount;j++){
+      layers[i]->layerNeurons[j].print();
+    }
+  }
+  
 }
-void Ann::readFile() {
+void Ann::readInputFile() {
     ifstream inputFileStream(inputFile);
     if (!inputFileStream.is_open()) {
         throw runtime_error("Could not open the file: " + inputFile);
     }
-
     json jsonData;
     inputFileStream >> jsonData;
   if (!jsonData.is_array()) {
@@ -195,8 +206,51 @@ void Ann::printVectors() {
         cout << endl;
     }
 }
-void Ann::parseAnn(){
+void Ann::saveAnn() {
+    json annToSave;
+    annToSave["inputVectorDimension"] = inputVectorDimension;
+    annToSave["outputVectorDimension"] = outputVectorDimension;
+    annToSave["numberOfPresentations"] = numberOfPresentations;
+    annToSave["hiddenLayerCount"] = hiddenLayerCount;
+    annToSave["presentationNo"] = presentationNo;
+    annToSave["currentIteration"] = currentIteration;
+    annToSave["thisIterationError"] = thisIterationError;
+    annToSave["layerInfo"] = json::array();
+    for (const auto& info : layerInfo) {
+        json layerInfoJson;
+        layerInfoJson["neuronCount"] = info.neuronCount;
+        layerInfoJson["activationType"] = info.activationType;  
+        annToSave["layerInfo"].push_back(layerInfoJson);
+    }
+        annToSave["inputMaximaMinima"] = json::array();
+    for (const auto& pair : inputMaximaMinima) {
+      
+        json pairJson;
+        pairJson["first"] = pair.first;
+        pairJson["second"] = pair.second;
+        annToSave["inputMaximaMinima"].push_back(pairJson);
+    }
+    annToSave["outputMaximaMinima"] = json::array();
+    for (const auto& pair : outputMaximaMinima) {
+        json pairJson;
+        pairJson["first"] = pair.first;
+        pairJson["second"] = pair.second;
+        annToSave["outputMaximaMinima"].push_back(pairJson);
+    }
+    annToSave["layers"] = json::array();
+    for (const auto& layer : layers) {
+      json layerJson=layer->parseLayer();
+        annToSave["layers"].push_back(layerJson);
+    }
+    std::ofstream outFile("ann.json");
+    if (outFile.is_open()) {
+        outFile << annToSave.dump(4);  
+        outFile.close();
+    } else {
+        std::cerr << "Error opening file for writing JSON!" << std::endl;
+    }
 }
+
 Vector Ann::getPreviousLayerOutput(Layer * lyr){
    Layer* previousLayer=layers[lyr->layerNumber-1];
    Vector output(previousLayer->neuronCount);
@@ -226,7 +280,7 @@ void Ann::updateNeurons(){
   }
 }
 void Ann::train(){
-  while(thisIterationError>0.1){
+  while(thisIterationError>0.001){
     presentationNo=0;
     thisIterationError=0;
     currentIteration++;
@@ -240,8 +294,8 @@ void Ann::train(){
     }
     cout<<thisIterationError<<"\n";
       err+="("+to_string(currentIteration)+","+to_string(thisIterationError)+"),";
-      writeErrorsInFile();
   }
+      writeErrorsInFile();
   saveAnn();
 }
 void Ann::writeErrorsInFile(){
@@ -256,6 +310,79 @@ void Ann::writeErrorsInFile(){
     outFile.close();
 
 }
+void Ann::normalizeOutput(){
+    int m = numberOfPresentations;
+  int  n = outputVectorDimension;
+    outputMaximaMinima.resize(n);
+    for (int i = 0; i < n; ++i) {
+        outputMaximaMinima[i] = {outputs[0][i], outputs[0][i]};
+        for (int j = 1; j < m; ++j) {
+            outputMaximaMinima[i].first = min(outputMaximaMinima[i].first, outputs[j][i]);
+            outputMaximaMinima[i].second = max(outputMaximaMinima[i].second, outputs[j][i]);
+        }
+    }
+
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < m; ++j) {
+            outputs[j][i] = (outputs[j][i] - outputMaximaMinima[i].first) / 
+                            (outputMaximaMinima[i].second - outputMaximaMinima[i].first);
+        }
+    }
+
+    
+}
+void Ann::normalizeInputs() {
+    int m = numberOfPresentations;
+    int n = inputVectorDimension;
+    inputMaximaMinima.resize(n);
+    for (int i = 0; i < n; ++i) {
+        inputMaximaMinima[i] = {inputs[0][i], inputs[0][i]};
+        for (int j = 1; j < m; ++j) {
+            inputMaximaMinima[i].first = min(inputMaximaMinima[i].first, inputs[j][i]);
+            inputMaximaMinima[i].second = max(inputMaximaMinima[i].second, inputs[j][i]);
+        }
+    }
+
+    for (int i = 0; i < n; ++i) {
+        for (int j = 0; j < m; ++j) {
+            inputs[j][i] = (inputs[j][i] - inputMaximaMinima[i].first) / 
+                           (inputMaximaMinima[i].second - inputMaximaMinima[i].first) ;
+        }
+    }
+
+}
+void Ann::normalizeData(){
+  normalizeInputs();
+  normalizeOutput();
+}
+void Ann::normalizeSingleInput(vector<float> input){
+inputs=vector<vector<float> >(1,vector<float>(inputVectorDimension));
+for (int i = 0; i < inputVectorDimension; ++i) {
+            inputs[0][i] = (input[i] - inputMaximaMinima[i].first) / 
+                           (inputMaximaMinima[i].second - inputMaximaMinima[i].first) ;
+    }
+}
+vector<float> Ann::unNormalizedOutput(vector<float> normalizedOutput){
+  vector<float> unNormalized;
+  for(int i=0;i<outputVectorDimension;i++){
+  float min=  outputMaximaMinima[i].first;
+  float max=  outputMaximaMinima[i].second;
+  unNormalized.push_back(normalizedOutput[i]*(max-min)+min);
+  }
+  return unNormalized;
+}
+void Ann:: printOutput(){
+  vector<float> outs;
+  for(int i=0;i<outputVectorDimension;i++){
+    outs.push_back(layers[hiddenLayerCount+1]->layerNeurons[i].fNeti);
+  }
+  vector<float> f=unNormalizedOutput(outs);
+  cout<<"[";
+  for(int i=0;i<outputVectorDimension;i++){
+    cout<<f[i];
+  }
+  cout<<"]\n";
+}
 int main(){
   vector<LayerInfo> vec;
   LayerInfo lyr;
@@ -264,11 +391,38 @@ int main(){
     lyr.neuronCount=3;
     vec.push_back(lyr);
   }
-  Ann a("./input.json","./output.json",1,1,100,vec);
-  a.readFile();
-  a.buildAnn();
-  
-  a.train();
+  int inputVectorDimensions=2;
+  Ann a("./inputs2.json",inputVectorDimensions,1,300,testing,vec);
+  // a.readFile();
+  // a.buildAnn();
+  // a.normalizeData();
+  // a.train();
+  // a.calcOutput();
+  // a.printLayers();
+    // a.printLayers();
+  while(true){
+  vector<float> input(inputVectorDimensions);
+    for(int i = 0; i < inputVectorDimensions; i++){
+        cin>>input[i];
+    }
+    a.normalizeSingleInput(input);
+    a.calcOutput();
+
+a.printOutput();
+// a.printLayers();
+}
+  // a.printLayers();
+  // a.printVectors();
+  // a.saveAnn();
+  // a.saveAnn();
+  // a.printVectors();
+  // Ann b=a;
+  // for(float i=0.15;i<60;i+=0.1){
+  // vector<vector<float>> inps={{i}};
+  // b.inputs=inps;
+  // b.presentationNo=0;
+  // b.calcOutput();
+  // b.printLayers();}
   // Ann a;
   // a.readAnn();
   // a.printVectors();

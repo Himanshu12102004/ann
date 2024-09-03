@@ -36,4 +36,12 @@ The Multilayer Perceptron (MLP) is a fundamental neural network model used for a
    git clone https://github.com/Himanshu12102004/ann.git
    cd ann
    ```
-2. Strating the project on mac:
+
+   ### How to Start
+
+- Generate a dataset:
+  - Write the command below in your terminal in the directory you have cloned
+  ```bash
+  g++ -std=c++11 generateData.cpp
+  ./a.out
+  ```

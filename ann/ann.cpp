@@ -8,7 +8,7 @@
 #include <fstream>
 using json = nlohmann::json;
 using namespace std;
-enum AnnMode{training,testing,production};
+enum AnnMode{initializing,training,testing,production};
 struct LayerInfo{
   int neuronCount=1;
   ActivationTypes activationType=unipolarSigmoidal;
@@ -16,6 +16,8 @@ struct LayerInfo{
 class Ann {
 public:
     string inputFile;
+    string trainingFile;
+    string testingFile; 
     string outputFile;
     int inputVectorDimension;
     int outputVectorDimension;
@@ -34,44 +36,53 @@ public:
     json trainedWeightsAndBias;
     float permissableError;
     string err;
-    Ann(string inputFile, int inputVectorDimension, int outputVectorDimension, int numberOfPresentations,AnnMode mode,vector<LayerInfo> layerInfo={}, string outputFile="trainedModel/ann.json",float permissableError=0.001);
+    float trainRatio;
+    Ann(string inputFile, int inputVectorDimension, int outputVectorDimension,AnnMode mode,vector<LayerInfo> layerInfo={},float permissableError=0.001,float trainRatio=0.8);
     Ann(){};
     void buildAnn();
     void calcOutput();
     void printVectors();
-    void computeErrors();
     void printLayers();
     Vector getPreviousLayerOutput(Layer* lyr);
     void calcDelEAndW();
     void updateNeurons();
     void train();
+    void test();
+    void segregateData(float segregationRatio=0.8F);
+    float calcError();
     void writeErrorsInFile();
     void saveAnn();
-    void readInputFile();
+    void readDataFile();
     void readAnn();
     void normalizeData();
     void normalizeOutput();
     void normalizeInputs();
-    void normalizeSingleInput(vector<float> singleInput);
+    bool normalizeSingleInput(vector<float> singleInput);
     void printOutput();
+    void start();
     vector<float> unNormalizedOutput(vector<float> normalizedOutputs);
 };
-Ann::Ann(string inputFile,  int inputVectorDimension, int outputVectorDimension, int numberOfPresentations,AnnMode mode,vector<LayerInfo> layerInfo,string outputFile,float permissableError)
-    :permissableError(permissableError), inputFile(inputFile),mode(mode), outputFile(outputFile), inputVectorDimension(inputVectorDimension), outputVectorDimension(outputVectorDimension), numberOfPresentations(numberOfPresentations),layerInfo(layerInfo){
+Ann::Ann(string inputFile,  int inputVectorDimension, int outputVectorDimension, AnnMode mode,vector<LayerInfo> layerInfo,float permissableError,float trainRatio)
+    :permissableError(permissableError), inputFile(inputFile),mode(mode), inputVectorDimension(inputVectorDimension), outputVectorDimension(outputVectorDimension),layerInfo(layerInfo),trainRatio(trainRatio){
 
-    if (inputVectorDimension <= 0 || outputVectorDimension <= 0 || numberOfPresentations <= 0) {
-        throw invalid_argument("Dimensions and number of presentations must be positive integers.");
+    if (inputVectorDimension <= 0 || outputVectorDimension <= 0) {
+        throw invalid_argument("Dimensions must be positive integers.");
     }
-    inputs.resize(numberOfPresentations, vector<float>(inputVectorDimension, 0.0f));
-    outputs.resize(numberOfPresentations, vector<float>(outputVectorDimension, 0.0f));
+    outputFile="trainedModel/ann.json";
+    trainingFile="normalizedData/training.json";
+    testingFile="normalizedData/testing.json";
     presentationNo=0;
     thisIterationError=1e20;
     if(mode==training){
-      readInputFile();
+      readDataFile();
+    inputs.resize(numberOfPresentations, vector<float>(inputVectorDimension, 0.0f));
+    outputs.resize(numberOfPresentations, vector<float>(outputVectorDimension, 0.0f));
     }
     else if(mode==testing){
       layerInfo={};
-      readInputFile();
+      readDataFile();
+    inputs.resize(numberOfPresentations, vector<float>(inputVectorDimension, 0.0f));
+    outputs.resize(numberOfPresentations, vector<float>(outputVectorDimension, 0.0f));
       readAnn();
       json layerInfoJson=trainedWeightsAndBias["layerInfo"];
       for(size_t i=0;i<layerInfoJson.size();i++){
@@ -81,15 +92,33 @@ Ann::Ann(string inputFile,  int inputVectorDimension, int outputVectorDimension,
         layerInfo.push_back(lyr);
       }
     }
+    else if(mode==production){
+      readAnn();
+    }
     hiddenLayerCount=layerInfo.size();
     buildAnn();
-    // cout<<hiddenLayerCount;
-}
-void Ann::computeErrors(){
-   
 }
 void Ann::buildAnn(){
   if(mode==training){
+    json config;
+      std::ifstream inFile("normalizedData/config.json");
+        if (!inFile.is_open()) {
+        throw std::runtime_error("Unable to open file ann.json");
+    }
+    inFile >>config;
+     inputMaximaMinima.resize(inputVectorDimension);
+        outputMaximaMinima.resize(outputVectorDimension);
+
+        for (size_t i = 0; i < inputVectorDimension; ++i) {
+            inputMaximaMinima[i].first = config["inputMaximaMinima"][i]["first"];
+            inputMaximaMinima[i].second = config["inputMaximaMinima"][i]["second"];
+        }
+
+        for (size_t i = 0; i < outputVectorDimension; ++i) {
+            outputMaximaMinima[i].first = config["outputMaximaMinima"][i]["first"];
+            outputMaximaMinima[i].second = config["outputMaximaMinima"][i]["second"];
+        }
+
   layers.push_back(new InputLayer(inputVectorDimension,0));
   layers[0]->buildLayer(1,nothing);
   for(int i=1;i<=hiddenLayerCount;i++){
@@ -99,7 +128,7 @@ void Ann::buildAnn(){
   layers.push_back(new OutputLayer(outputVectorDimension,hiddenLayerCount+1));
   layers[hiddenLayerCount+1]->buildLayer(layers[hiddenLayerCount]->neuronCount);
   }
-  else if(mode==testing){
+  else if(mode==testing||mode==production){
     layers.push_back(new InputLayer(inputVectorDimension,0));
     layers[0]->buildLayer(trainedWeightsAndBias["layers"][0],nothing);
      for(size_t i=1;i<=hiddenLayerCount;i++){
@@ -134,27 +163,28 @@ void Ann::readAnn() {
 
 void Ann::printLayers(){
   for(int i=0;i<hiddenLayerCount+2;i++){
-  cout<<"=================================================================================="<<endl;;
     for(int j=0;j<layers[i]->neuronCount;j++){
       layers[i]->layerNeurons[j].print();
     }
   }
   
 }
-void Ann::readInputFile() {
-    ifstream inputFileStream(inputFile);
+void Ann::readDataFile() {
+  string fileToread=mode==training?trainingFile:testingFile;
+    ifstream inputFileStream(fileToread);
     if (!inputFileStream.is_open()) {
         throw runtime_error("Could not open the file: " + inputFile);
     }
     json jsonData;
     inputFileStream >> jsonData;
+    // cout<<jsonData.size();
+
   if (!jsonData.is_array()) {
         throw runtime_error("Expected an array of objects in the JSON file.");
     }
-    if (jsonData.size() != numberOfPresentations) {
-        throw runtime_error("Number of presentations in JSON file does not match the expected value.");
-    }
-
+    int totalData=jsonData.size();
+    inputs.resize(totalData, std::vector<float>(inputVectorDimension, 0.0f));
+    outputs.resize(totalData, std::vector<float>(outputVectorDimension, 0.0f));
     for (size_t i = 0; i < jsonData.size(); ++i) {
         if (!jsonData[i].contains("inputs") || !jsonData[i].contains("outputs")) {
             throw runtime_error("Each JSON object must contain 'inputs' and 'outputs' arrays.");
@@ -170,11 +200,11 @@ void Ann::readInputFile() {
         inputs[i] = inputVector;
         outputs[i] = outputVector;
     }
+    numberOfPresentations=jsonData.size();
 }
 void Ann::calcOutput(){
   Vector input(inputVectorDimension);
   for(int i=0;i<inputVectorDimension;i++){
-    // cout<<"input"<<inputs[presentationNo][i]<<endl;
     vector<float>vec(1,inputs[presentationNo][i]);
     Vector v(vec);
     layers[0]->layerNeurons[i].calcNeti(v);
@@ -278,6 +308,13 @@ void Ann::updateNeurons(){
     }
   }
 }
+float Ann::calcError(){
+float thisOutputErr=0;
+for(int i=0;i<outputVectorDimension;i++){
+  float outp=layers[hiddenLayerCount+1]->layerNeurons[i].fNeti;
+  thisOutputErr+= pow(outp-outputs[presentationNo][i],2);
+}
+return thisOutputErr;}
 void Ann::train(){
   while(thisIterationError>permissableError){
     presentationNo=0;
@@ -287,15 +324,23 @@ void Ann::train(){
     calcOutput();
     calcDelEAndW();
     updateNeurons();
-  float outp=layers[hiddenLayerCount+1]->layerNeurons[0].fNeti;
-   thisIterationError+=pow(outp-outputs[presentationNo][0],2);
+   thisIterationError+=calcError();
    ++presentationNo;
     }
-    cout<<thisIterationError<<"\n";
-      err+="("+to_string(currentIteration)+","+to_string(thisIterationError)+"),";
+    thisIterationError=(thisIterationError/numberOfPresentations)*100;
+    cout<<"Current Error = "<<thisIterationError<<"%\n";
   }
-      writeErrorsInFile();
   saveAnn();
+}
+void Ann::test(){
+  float iterationError=0;
+  for(int j=0;j<numberOfPresentations;j++){
+    calcOutput();
+    iterationError+=calcError();
+   ++presentationNo;
+  }
+    cout<<"Error in testing Data = "<<(iterationError/numberOfPresentations)*100<<"%\n";
+  
 }
 void Ann::writeErrorsInFile(){
     std::ofstream outFile;
@@ -354,12 +399,18 @@ void Ann::normalizeData(){
   normalizeInputs();
   normalizeOutput();
 }
-void Ann::normalizeSingleInput(vector<float> input){
+bool Ann::normalizeSingleInput(vector<float> input){
 inputs=vector<vector<float> >(1,vector<float>(inputVectorDimension));
 for (int i = 0; i < inputVectorDimension; ++i) {
+  if(input[i]<inputMaximaMinima[i].first||input[i]>inputMaximaMinima[i].second){
+    cout<<
+"Sorry, I can't extrapolate. Please provide input components within the trained range.\n";
+return false;
+  }
             inputs[0][i] = (input[i] - inputMaximaMinima[i].first) / 
                            (inputMaximaMinima[i].second - inputMaximaMinima[i].first) ;
     }
+    return true;
 }
 vector<float> Ann::unNormalizedOutput(vector<float> normalizedOutput){
   vector<float> unNormalized;
@@ -370,6 +421,118 @@ vector<float> Ann::unNormalizedOutput(vector<float> normalizedOutput){
   }
   return unNormalized;
 }
+void Ann::segregateData(float trainRatio) {
+    std::ifstream inputFileStream(inputFile);
+    if (!inputFileStream.is_open()) {
+        throw std::runtime_error("Could not open the input file: " + inputFile);
+    }
+
+    json jsonData;
+    inputFileStream >> jsonData;
+    inputFileStream.close();
+
+    if (!jsonData.is_array()) {
+        throw std::runtime_error("Input file should contain a JSON array.");
+    }
+    std::vector<std::pair<std::vector<float>, std::vector<float>>> allData;
+
+    for (size_t i = 0; i < jsonData.size(); ++i) {
+        if (!jsonData[i].contains("inputs") || !jsonData[i].contains("outputs")) {
+            throw std::runtime_error("Each JSON object must contain 'inputs' and 'outputs' arrays.");
+        }
+
+        std::vector<float> inputVector = jsonData[i]["inputs"].get<std::vector<float>>();
+        std::vector<float> outputVector = jsonData[i]["outputs"].get<std::vector<float>>();
+
+        if (inputVector.size() != static_cast<size_t>(inputVectorDimension)) {
+            throw std::runtime_error("Input vector size does not match expected input dimension.");
+        }
+
+        if (outputVector.size() != static_cast<size_t>(outputVectorDimension)) {
+            throw std::runtime_error("Output vector size does not match expected output dimension.");
+        }
+
+        allData.emplace_back(inputVector, outputVector);
+    }
+
+    size_t totalData = allData.size();
+    if (totalData == 0) {
+        throw std::runtime_error("No data found in the input file.");
+    }
+    inputs.resize(totalData, std::vector<float>(inputVectorDimension, 0.0f));
+    outputs.resize(totalData, std::vector<float>(outputVectorDimension, 0.0f));
+
+    for (size_t i = 0; i < totalData; ++i) {
+        inputs[i] = allData[i].first;
+        outputs[i] = allData[i].second;
+    }
+    numberOfPresentations=totalData;
+    normalizeData();
+
+    std::vector<size_t> indices(totalData);
+    for (size_t i = 0; i < totalData; ++i) {
+        indices[i] = i;
+    }
+
+    std::random_device rd;
+    std::mt19937 g(rd());
+    std::shuffle(indices.begin(), indices.end(), g);
+    size_t trainSize = static_cast<size_t>(trainRatio * totalData);
+    size_t testSize = totalData - trainSize;
+
+    json trainingJson = json::array();
+    json testingJson = json::array();
+
+    for (size_t i = 0; i < trainSize; ++i) {
+        size_t idx = indices[i];
+        json dataPoint;
+        dataPoint["inputs"] = inputs[idx];
+        dataPoint["outputs"] = outputs[idx];
+        trainingJson.push_back(dataPoint);
+    }
+
+    for (size_t i = trainSize; i < totalData; ++i) {
+        size_t idx = indices[i];
+        json dataPoint;
+        dataPoint["inputs"] = inputs[idx];
+        dataPoint["outputs"] = outputs[idx];
+        testingJson.push_back(dataPoint);
+    }
+    std::ofstream trainingOut(trainingFile);
+    if (!trainingOut.is_open()) {
+        throw std::runtime_error("Could not open training file for writing: " + trainingFile);
+    }
+    trainingOut << trainingJson.dump(4);
+    trainingOut.close();
+
+    std::ofstream testingOut(testingFile);
+    if (!testingOut.is_open()) {
+        throw std::runtime_error("Could not open testing file for writing: " + testingFile);
+    }
+    testingOut << testingJson.dump(4);
+    testingOut.close();
+
+    std::cout << "Data segregation completed successfully.\n";
+    std::cout << "Training data size: " << trainSize << "\n";
+    std::cout << "Testing data size: " << testSize << "\n";
+    json config;
+    for(int i=0;i<inputVectorDimension;i++){
+      json obj;
+      obj["first"]=inputMaximaMinima[i].first;
+      obj["second"]=inputMaximaMinima[i].second;
+      config["inputMaximaMinima"].push_back(obj);
+    }
+    for(int i=0;i<outputVectorDimension;i++){
+      json obj;
+      obj["first"]=outputMaximaMinima[i].first;
+      obj["second"]=outputMaximaMinima[i].second;
+      config["outputMaximaMinima"].push_back(obj);
+    }
+    std::ofstream configOut("normalizedData/config.json");
+    configOut << config.dump(4);
+    configOut.close();
+
+}
 void Ann:: printOutput(){
   vector<float> outs;
   for(int i=0;i<outputVectorDimension;i++){
@@ -378,51 +541,32 @@ void Ann:: printOutput(){
   vector<float> f=unNormalizedOutput(outs);
   cout<<"[";
   for(int i=0;i<outputVectorDimension;i++){
-    cout<<f[i];
+    cout<<f[i]<<", ";
   }
   cout<<"]\n";
 }
-// int main(){
-//   vector<LayerInfo> vec;
-//   LayerInfo lyr;
-//   for(int i=0;i<3;i++){
-//     lyr.activationType=unipolarSigmoidal;
-//     lyr.neuronCount=3;
-//     vec.push_back(lyr);
-//   }
-//   int inputVectorDimensions=2;
-//   Ann a("./inputs2.json",inputVectorDimensions,1,300,testing,vec);
-//   // a.readFile();
-//   // a.buildAnn();
-//   // a.normalizeData();
-//   // a.train();
-//   // a.calcOutput();
-//   // a.printLayers();
-//     // a.printLayers();
-//   while(true){
-//   vector<float> input(inputVectorDimensions);
-//     for(int i = 0; i < inputVectorDimensions; i++){
-//         cin>>input[i];
-//     }
-//     a.normalizeSingleInput(input);
-//     a.calcOutput();
-
-// a.printOutput();
-// // a.printLayers();
-// }
-//   // a.printLayers();
-//   // a.printVectors();
-//   // a.saveAnn();
-//   // a.saveAnn();
-//   // a.printVectors();
-//   // Ann b=a;
-//   // for(float i=0.15;i<60;i+=0.1){
-//   // vector<vector<float>> inps={{i}};
-//   // b.inputs=inps;
-//   // b.presentationNo=0;
-//   // b.calcOutput();
-//   // b.printLayers();}
-//   // Ann a;
-//   // a.readAnn();
-//   // a.printVectors();
-// }
+void Ann::start(){
+  if(mode==initializing)
+    segregateData(trainRatio);
+  else if(mode==training)
+   train();
+   else if(mode==testing)
+   test();
+   else if(mode==production)
+   {
+    int testCases;
+    cout<<"Enter the number of test cases you want to calculate output: ";
+    cin>>testCases;
+      while(testCases--){
+  vector<float> input(inputVectorDimension);
+  cout<<"Enter the inputs seperated by spaces: ";
+    for(int i = 0; i < inputVectorDimension; i++){
+        cin>>input[i];
+    }
+  bool isNormalized=  normalizeSingleInput(input);
+    if(isNormalized)
+    {calcOutput();
+printOutput();}
+}
+   }
+}

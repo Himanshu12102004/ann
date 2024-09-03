@@ -32,10 +32,9 @@ public:
     float thisIterationError;
     AnnMode mode;
     json trainedWeightsAndBias;
-    
-public:
+    float permissableError;
     string err;
-    Ann(string inputFile, int inputVectorDimension, int outputVectorDimension, int numberOfPresentations,AnnMode mode,vector<LayerInfo> layerInfo={}, string outputFile="ann.json");
+    Ann(string inputFile, int inputVectorDimension, int outputVectorDimension, int numberOfPresentations,AnnMode mode,vector<LayerInfo> layerInfo={}, string outputFile="trainedModel/ann.json",float permissableError=0.001);
     Ann(){};
     void buildAnn();
     void calcOutput();
@@ -57,8 +56,8 @@ public:
     void printOutput();
     vector<float> unNormalizedOutput(vector<float> normalizedOutputs);
 };
-Ann::Ann(string inputFile,  int inputVectorDimension, int outputVectorDimension, int numberOfPresentations,AnnMode mode,vector<LayerInfo> layerInfo,string outputFile)
-    : inputFile(inputFile),mode(mode), outputFile(outputFile), inputVectorDimension(inputVectorDimension), outputVectorDimension(outputVectorDimension), numberOfPresentations(numberOfPresentations),layerInfo(layerInfo){
+Ann::Ann(string inputFile,  int inputVectorDimension, int outputVectorDimension, int numberOfPresentations,AnnMode mode,vector<LayerInfo> layerInfo,string outputFile,float permissableError)
+    :permissableError(permissableError), inputFile(inputFile),mode(mode), outputFile(outputFile), inputVectorDimension(inputVectorDimension), outputVectorDimension(outputVectorDimension), numberOfPresentations(numberOfPresentations),layerInfo(layerInfo){
 
     if (inputVectorDimension <= 0 || outputVectorDimension <= 0 || numberOfPresentations <= 0) {
         throw invalid_argument("Dimensions and number of presentations must be positive integers.");
@@ -125,7 +124,7 @@ void Ann::buildAnn(){
 };
 
 void Ann::readAnn() {
-      std::ifstream inFile("ann.json");
+      std::ifstream inFile("trainedModel/ann.json");
     if (!inFile.is_open()) {
         throw std::runtime_error("Unable to open file ann.json");
     }
@@ -242,7 +241,7 @@ void Ann::saveAnn() {
       json layerJson=layer->parseLayer();
         annToSave["layers"].push_back(layerJson);
     }
-    std::ofstream outFile("ann.json");
+    std::ofstream outFile(outputFile);
     if (outFile.is_open()) {
         outFile << annToSave.dump(4);  
         outFile.close();
@@ -280,7 +279,7 @@ void Ann::updateNeurons(){
   }
 }
 void Ann::train(){
-  while(thisIterationError>0.001){
+  while(thisIterationError>permissableError){
     presentationNo=0;
     thisIterationError=0;
     currentIteration++;
@@ -383,47 +382,47 @@ void Ann:: printOutput(){
   }
   cout<<"]\n";
 }
-int main(){
-  vector<LayerInfo> vec;
-  LayerInfo lyr;
-  for(int i=0;i<3;i++){
-    lyr.activationType=unipolarSigmoidal;
-    lyr.neuronCount=3;
-    vec.push_back(lyr);
-  }
-  int inputVectorDimensions=2;
-  Ann a("./inputs2.json",inputVectorDimensions,1,300,testing,vec);
-  // a.readFile();
-  // a.buildAnn();
-  // a.normalizeData();
-  // a.train();
-  // a.calcOutput();
-  // a.printLayers();
-    // a.printLayers();
-  while(true){
-  vector<float> input(inputVectorDimensions);
-    for(int i = 0; i < inputVectorDimensions; i++){
-        cin>>input[i];
-    }
-    a.normalizeSingleInput(input);
-    a.calcOutput();
+// int main(){
+//   vector<LayerInfo> vec;
+//   LayerInfo lyr;
+//   for(int i=0;i<3;i++){
+//     lyr.activationType=unipolarSigmoidal;
+//     lyr.neuronCount=3;
+//     vec.push_back(lyr);
+//   }
+//   int inputVectorDimensions=2;
+//   Ann a("./inputs2.json",inputVectorDimensions,1,300,testing,vec);
+//   // a.readFile();
+//   // a.buildAnn();
+//   // a.normalizeData();
+//   // a.train();
+//   // a.calcOutput();
+//   // a.printLayers();
+//     // a.printLayers();
+//   while(true){
+//   vector<float> input(inputVectorDimensions);
+//     for(int i = 0; i < inputVectorDimensions; i++){
+//         cin>>input[i];
+//     }
+//     a.normalizeSingleInput(input);
+//     a.calcOutput();
 
-a.printOutput();
-// a.printLayers();
-}
-  // a.printLayers();
-  // a.printVectors();
-  // a.saveAnn();
-  // a.saveAnn();
-  // a.printVectors();
-  // Ann b=a;
-  // for(float i=0.15;i<60;i+=0.1){
-  // vector<vector<float>> inps={{i}};
-  // b.inputs=inps;
-  // b.presentationNo=0;
-  // b.calcOutput();
-  // b.printLayers();}
-  // Ann a;
-  // a.readAnn();
-  // a.printVectors();
-}
+// a.printOutput();
+// // a.printLayers();
+// }
+//   // a.printLayers();
+//   // a.printVectors();
+//   // a.saveAnn();
+//   // a.saveAnn();
+//   // a.printVectors();
+//   // Ann b=a;
+//   // for(float i=0.15;i<60;i+=0.1){
+//   // vector<vector<float>> inps={{i}};
+//   // b.inputs=inps;
+//   // b.presentationNo=0;
+//   // b.calcOutput();
+//   // b.printLayers();}
+//   // Ann a;
+//   // a.readAnn();
+//   // a.printVectors();
+// }

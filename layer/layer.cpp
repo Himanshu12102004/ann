@@ -7,11 +7,11 @@ class Layer{
   Layer(int neuronCount,int layerNumber);
   int neuronCount;
   int layerNumber;
-  float learningConstant=0.5;
+  float learningConstant=0.9;
   Vector passBackError();
   virtual  void computeDelE(Vector passedBackError);
   virtual void computeDelW(Vector previousLayerOutput);
-  virtual void buildLayer(int lastLayerNeuronCount,ActivationTypes activationType=unipolarSigmoidal  )=0;
+  virtual void buildLayer(int lastLayerNeuronCount,ActivationTypes activationType=unipolarSigmoidal )=0;
   void buildLayer(json layerInfo,ActivationTypes activationType=unipolarSigmoidal);
   json parseLayer();
 };

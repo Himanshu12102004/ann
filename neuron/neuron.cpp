@@ -18,7 +18,6 @@ struct ActivationParameters {
 };
 class Neuron{
   public:
-  
   float output;
   float bias;
   float neti;

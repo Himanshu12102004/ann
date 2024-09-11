@@ -26,7 +26,7 @@ Note:
 
   vector<LayerInfo> layerInfo;
   LayerInfo lyr;
-  for(int i=0;i<3;i++){
+  for(int i=0;i<1;i++){
     lyr.activationType=unipolarSigmoidal;
     lyr.neuronCount=3;
     layerInfo.push_back(lyr);
@@ -53,10 +53,11 @@ Example Usage:
   and training parameters. In `initializing` mode, it normalizes and splits the data before any training begins.
   The network can then be trained by calling the `start()` method.
 */
-  int inputVectorDimension=3;
-  int outputVectorDimension=2;
-  float permissablePercentError=0.05;
-  float trainRatio=0.8;
-  Ann a("inputData/input.json",inputVectorDimension,outputVectorDimension,testing,layerInfo,permissablePercentError,trainRatio);
+  int inputVectorDimension=1;
+  int outputVectorDimension=1;
+  float permissablePercentError=0.01;
+  float trainRatio=1;
+  Ann a("inputData/input.json",inputVectorDimension,outputVectorDimension,production,layerInfo,permissablePercentError,trainRatio);
   a.start();
+  int b=int(5.9);
 }

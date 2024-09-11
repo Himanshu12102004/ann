@@ -329,7 +329,10 @@ void Ann::train(){
     }
     thisIterationError=(thisIterationError/numberOfPresentations)*100;
     cout<<"Current Error = "<<thisIterationError<<"%\n";
+  err=err+"("+
+  to_string(currentIteration)+","+to_string(thisIterationError)+") ,";
   }
+  writeErrorsInFile();
   saveAnn();
 }
 void Ann::test(){
@@ -339,6 +342,7 @@ void Ann::test(){
     iterationError+=calcError();
    ++presentationNo;
   }
+
     cout<<"Error in testing Data = "<<(iterationError/numberOfPresentations)*100<<"%\n";
   
 }
@@ -566,7 +570,10 @@ void Ann::start(){
   bool isNormalized=  normalizeSingleInput(input);
     if(isNormalized)
     {calcOutput();
-printOutput();}
+printOutput();
+// printLayers();
+
+}
 }
    }
 }

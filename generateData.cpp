@@ -2,8 +2,8 @@
 #include <fstream>
 #include <vector>
 #include <cmath>
-#include <random>
 #include "utils/json.hpp"
+#include "utils/randomNumberGenerator.h"
 using json = nlohmann::json;
 using namespace  std;
 struct DataPoint {
@@ -13,22 +13,12 @@ struct DataPoint {
 
 int main() {
     vector<DataPoint> data;
-    random_device rd;
-    mt19937 gen(rd());
-    uniform_real_distribution<> dis(0.0, 100.0);
-
-    for (int i = 0; i < 300; ++i) {
-        double x = dis(gen);
-        double y = dis(gen);
-        double z = dis(gen) * 0.7;
-
-        double p = pow(x, 1) + sqrt(5 * y) + sqrt(z);
-        double q = x + y + z;
-
+    for (int i = 0; i < 100; ++i) {
+        double x = generateRandomFloat(0,1);
+        double p =x*x;
         DataPoint point;
-        point.inputs = {x, y, z};
-        point.outputs = {p, q};
-
+        point.inputs = {x};
+        point.outputs = {p};
         data.push_back(point);
     }
 
@@ -39,6 +29,6 @@ int main() {
 
     ofstream file("inputData/input.json");
     file << j_data.dump(4); 
-     cout<<"Data Generated Successfully\n";
+     cout<<"Dataset Generated Successfully\n";
     return 0;
 }
